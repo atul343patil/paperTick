@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+	* {
+		box-sizing: border-box;
+		margin: 0;
+		padding: 0;
+	}
+
+	body {
+		background-color: #0A0E1A;
+		color: #F1F5F9;
+		font-family: "Poppins", sans-serif;
+		-webkit-font-smoothing: antialiased;
+	}
+
+	/* Custom scrollbar */
+	::-webkit-scrollbar {
+		width: 6px;
+		height: 6px;
+	}
+	::-webkit-scrollbar-track {
+		background: #111827;
+	}
+	::-webkit-scrollbar-thumb {
+		background: #1F2D45;
+		border-radius: 3px;
+	}
+	::-webkit-scrollbar-thumb:hover {
+		background: #3B82F6;
+	}
+
+	/* Remove autofill background in Chrome */
+	input:-webkit-autofill {
+		-webkit-box-shadow: 0 0 0 1000px #1A2236 inset;
+		-webkit-text-fill-color: #F1F5F9;
+	}
+}
+
+@layer components {
+	.input-field {
+		@apply w-full bg-surfaceAlt border border-border rounded-lg px-4 py-3
+					 text-textPrimary placeholder-textMuted text-sm
+					 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary
+					 transition-colors duration-200;
+	}
+
+	.btn-primary {
+		@apply bg-primary hover:bg-primaryHover text-white font-medium
+					 px-6 py-3 rounded-lg text-sm transition-colors duration-200
+					 disabled:opacity-50 disabled:cursor-not-allowed;
+	}
+
+	.btn-ghost {
+		@apply bg-transparent hover:bg-surfaceAlt text-textSecondary
+					 hover:text-textPrimary px-4 py-2 rounded-lg text-sm
+					 transition-colors duration-200 border border-border;
+	}
+
+	.card {
+		@apply bg-surface border border-border rounded-xl p-6;
+	}
+}

@@ -1,0 +1,151 @@
+# Phase 7: Options Calculator — ML-Powered Pricing Engine
+
+## Overview
+
+Add a complete Options Calculator to PaperTick with three pricing engines running in parallel:
+1. **Black-Scholes** (analytical baseline)
+2. **Monte Carlo** (10K simulations with antithetic variates)
+3. **Hybrid LSTM-CNN** (neural network with physics-informed loss, falls back to noisy BS when untrained)
+
+Results are displayed side-by-side with Greeks comparison table and payoff diagram.
+
+## Scope & Safety
+
+> [!IMPORTANT]
+> **Zero modifications to existing Phase 1–6 code** except:
+> - Adding 1 route line in `server/src/app.js`
+> - Adding `ML_SERVICE_URL` to `server/.env`
+>
+> All new code lives in isolated files/folders.
+
+## Proposed Changes
+
+### Component 1: Python ML Service (`ml-service/`)
+
+The existing `ml-service/` already has stub files (`app.py`, `utils/black_scholes.py`, `utils/greeks.py`, `models/hybrid_model.py`). We will **overwrite all of these** with the full implementations and **add new files**.
+
+---
+
+#### [MODIFY] [requirements.txt](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/requirements.txt)
+- Replace with full dependency list: Flask 3.0.0, flask-cors 4.0.0, tensorflow 2.15.0, numpy, scipy, scikit-learn, joblib, pandas
+
+#### [MODIFY] [app.py](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/app.py)
+- Complete Flask app with CORS for localhost:5000 and :5173
+- Endpoints: `POST /predict`, `POST /train`, `GET /model-status`, `GET /health`
+- All responses sanitized (no NaN/Infinity/null)
+- Port 5001
+
+#### [NEW] [models/black_scholes.py](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/models/black_scholes.py)
+- Full analytical BS with all Greeks (Delta, Gamma, Theta, Vega, Rho)
+- Boundary conditions enforced (T→0, σ→0 edge cases)
+- All value clamping as specified
+
+#### [NEW] [models/monte_carlo.py](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/models/monte_carlo.py)
+- 10K simulations with antithetic variates
+- Greeks via bump-and-reprice (finite difference) with shared random seed
+- Returns std_error and 95% confidence interval
+
+#### [MODIFY] [models/hybrid_model.py](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/models/hybrid_model.py)
+- Full LSTM-CNN architecture (2×LSTM-64 + 1D-Conv-64 parallel branches, merged dense layers)
+- Physics-informed loss: L_data + λ·L_PDE + γ·L_boundary
+- Training with synthetic NSE data, Adam optimizer, early stopping
+- Fallback to BS±5% noise when untrained
+
+#### [NEW] [models/greeks.py](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/models/greeks.py)
+- Numerical Greeks via finite difference (for MC and NN)
+
+#### [NEW] [models/ensemble.py](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/models/ensemble.py)
+- Weighted ensemble: 0.2×BS + 0.1×MC + 0.7×NN
+- Boundary clamp on ensemble output
+
+#### [NEW] [utils/validators.py](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/utils/validators.py)
+- Input validation with strict bounds (S, K, T, r, sigma, option_type)
+- Sanitization: convert to float, handle None/null
+
+#### [NEW] [utils/feature_engineering.py](file:///c:/Users/Atul%20Patil/Desktop/Papertick/ml-service/utils/feature_engineering.py)
+- 15 features from paper (log_moneyness, sqrt_T, d1, d2, bs_price, etc.)
+- StandardScaler normalization
+- Synthetic sequence generation (30 timesteps) for LSTM input
+
+> [!NOTE]
+> The old `ml-service/utils/black_scholes.py` and `ml-service/utils/greeks.py` will be kept as-is (they won't conflict since the new code imports from `models/`). If you prefer, I can delete them to avoid confusion.
+
+---
+
+### Component 2: Express Backend (additions only)
+
+#### [NEW] [calculatorController.js](file:///c:/Users/Atul%20Patil/Desktop/Papertick/server/src/controllers/calculatorController.js)
+- `calculatePrice` — proxies to ML service `/predict`
+- `getModelStatus` — proxies to `/model-status`
+- `triggerTraining` — proxies to `/train`
+- Uses existing `asyncHandler`, `ApiResponse`, `ApiError` patterns
+- Graceful ECONNREFUSED handling (503)
+
+#### [NEW] [calculatorRoutes.js](file:///c:/Users/Atul%20Patil/Desktop/Papertick/server/src/routes/calculatorRoutes.js)
+- All routes behind `protect` middleware
+- `POST /price`, `GET /model-status`, `POST /train`
+
+#### [MODIFY] [app.js](file:///c:/Users/Atul%20Patil/Desktop/Papertick/server/src/app.js)
+- Add single line: `app.use("/api/calculator", require("./routes/calculatorRoutes"));`
+- Inserted after existing routes, before 404 handler (line 40)
+
+#### [MODIFY] [.env](file:///c:/Users/Atul%20Patil/Desktop/Papertick/server/.env)
+- Add: `ML_SERVICE_URL=http://localhost:5001`
+
+> [!WARNING]
+> The user's route file spec has a bug: it imports `{ protect }` from middleware but then uses `calculatorController.calculatePrice` syntax without importing `calculatorController`. I'll fix this to use destructured imports correctly.
+
+---
+
+### Component 3: React Frontend
+
+#### [NEW] [calculatorApi.js](file:///c:/Users/Atul%20Patil/Desktop/Papertick/client/src/api/calculatorApi.js)
+- `calculateOptionPrice(payload)` — POST to `/calculator/price`
+- `getModelStatus()` — GET `/calculator/model-status`
+- `triggerTraining()` — POST `/calculator/train`
+- Uses existing `axiosInstance`
+
+#### [MODIFY] [Calculator.jsx](file:///c:/Users/Atul%20Patil/Desktop/Papertick/client/src/pages/Calculator.jsx)
+- Full replacement of the stub page with complete calculator UI
+- **Header**: Title, subtitle, model status badge, Train Model button
+- **Input Panel** (left 30%): All form fields with Indian market defaults
+  - Spot Price, Strike Price, Days to Expiry (converted to years)
+  - Risk-Free Rate % (converted to decimal), IV % (converted to decimal)
+  - Call/Put toggle, Calculate button, Quick presets (ATM Nifty, Deep ITM, Deep OTM, BANKNIFTY)
+- **Results Panel** (right 70%):
+  - 3 price comparison cards (BS, MC, LSTM-CNN highlighted)
+  - Greeks table with color coding (Delta/green-red, Theta/red, Vega/amber, Gamma/blue)
+  - Payoff diagram (Recharts LineChart — at-expiry + current-value curves)
+- **Accuracy Comparison** (collapsible) with paper citation
+- Loading states (skeleton shimmer), error states (ML offline graceful degradation)
+- All formatting rules enforced (₹, decimal places, "—" for null)
+- Uses `Navbar`, `IndicesTicker`, `recharts` (already installed)
+
+---
+
+## Open Questions
+
+1. **Old ML utils cleanup**: The existing `ml-service/utils/black_scholes.py` and `ml-service/utils/greeks.py` are no longer used by the new `app.py`. Should I delete them to keep the folder clean, or leave them?
+
+2. **TensorFlow version**: The spec says `tensorflow==2.15.0` but the current `requirements.txt` has `tensorflow==2.16.1`. TF 2.15.0 is more stable for this use case. I'll use 2.15.0 per spec — is that acceptable?
+
+3. **`saved/` directory**: The spec mentions `model_weights.h5` and `scaler.pkl` in `ml-service/saved/`. The existing `ml-service/models/saved/` directory exists. I'll use `ml-service/models/saved/` to match existing structure. OK?
+
+## Verification Plan
+
+### Automated Tests
+1. Start ML service: `cd ml-service && python app.py` — verify `/health` returns `{"status":"ok"}`
+2. Test `/predict` endpoint directly with curl/Postman with sample Nifty ATM params
+3. Verify all three models return valid bounded results
+4. Start Express server and test `/api/calculator/price` through the proxy
+5. Run the React dev server and navigate to `/calculator`
+
+### Browser Verification
+- Open Calculator page, verify all UI sections render
+- Enter ATM Nifty defaults and click Calculate
+- Verify all three price cards populate with reasonable values
+- Verify Greeks table shows correct formatting
+- Verify payoff diagram renders
+- Test graceful degradation when ML service is offline
+- Test Call/Put toggle
+- Test quick presets
