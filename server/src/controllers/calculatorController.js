@@ -43,14 +43,5 @@ const getModelStatus = asyncHandler(async (req, res) => {
   }
 });
 
-// POST /api/calculator/train
-const triggerTraining = asyncHandler(async (req, res) => {
-  try {
-    const { data } = await axios.post(`${ML_SERVICE_URL}/train`, { use_synthetic: true }, { timeout: 10000 });
-    res.json(new ApiResponse(200, data, "Training initiated"));
-  } catch (err) {
-    throw new ApiError(503, "ML service unavailable");
-  }
-});
+module.exports = { calculatePrice, getModelStatus };
 
-module.exports = { calculatePrice, getModelStatus, triggerTraining };

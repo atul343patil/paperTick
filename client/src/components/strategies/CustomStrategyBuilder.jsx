@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Plus, Trash2 } from "lucide-react";
 import {
@@ -10,15 +11,16 @@ import toast from "react-hot-toast";
 const EMPTY_LEG = {
   optionType: "CE",
   action: "BUY",
-  strike: 22500,
+  strike: 24000,
   premium: 100,
   lots: 1,
-  lotSize: 50,
+  lotSize: 25,
 };
 
 const CustomStrategyBuilder = () => {
   const dispatch = useDispatch();
   const { customLegs, analyzing } = useSelector((s) => s.strategy);
+  const [underlying, setUnderlying] = useState(24000);
 
   const handleAdd = () => {
     if (customLegs.length >= 8) {
@@ -35,9 +37,13 @@ const CustomStrategyBuilder = () => {
     if (customLegs.length === 0) {
       toast.error("Add at least one leg."); return;
     }
-    // Use the first leg's strike as the underlying proxy
-    const underlying = customLegs[0].strike;
-    dispatch(runCustomAnalysis({ legs: customLegs, underlyingPrice: underlying }));
+    if (!underlying || underlying <= 0) {
+      toast.error("Enter a valid underlying price."); return;
+    }
+    dispatch(runCustomAnalysis({
+      legs: customLegs,
+      underlyingPrice: underlying,
+    }));
   };
 
   return (
@@ -60,6 +66,25 @@ const CustomStrategyBuilder = () => {
             <Plus size={13} /> Add Leg
           </button>
         </div>
+      </div>
+
+      {/* Underlying Price — FIX: separate field instead of using first leg's strike */}
+      <div className="bg-surfaceAlt rounded-lg p-3">
+        <label className="block text-xs text-textMuted mb-1.5">
+          Current Underlying Price (₹)
+        </label>
+        <input
+          type="number"
+          value={underlying}
+          min="1"
+          step="50"
+          onChange={(e) => setUnderlying(parseFloat(e.target.value) || 0)}
+          placeholder="e.g. 24000 for Nifty"
+          className="input-field text-sm py-2"
+        />
+        <p className="text-xs text-textMuted mt-1">
+          Used to center the payoff chart around current market levels
+        </p>
       </div>
 
       {customLegs.length === 0 ? (

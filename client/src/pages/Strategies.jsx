@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { BarChart2 } from "lucide-react";
 import Navbar from "../components/common/Navbar";
 import IndicesTicker from "../components/markets/IndicesTicker";
 import StrategyCard from "../components/strategies/StrategyCard";
@@ -114,12 +115,21 @@ const Strategies = () => {
           {!selectedId && mode === "predefined" && (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
               <div className="w-16 h-16 rounded-2xl bg-surface border border-border flex items-center justify-center mb-4">
-                <span className="text-2xl">📊</span>
+                <BarChart2 size={28} className="text-textMuted" />
               </div>
               <p className="text-textPrimary font-semibold mb-2">Select a Strategy</p>
-              <p className="text-textMuted text-sm max-w-sm">
-                Choose a predefined strategy from the left panel, enter your parameters, and analyze the payoff diagram
+              <p className="text-textMuted text-sm max-w-sm leading-relaxed">
+                Choose a strategy from the left panel. All parameters are
+                pre-filled with realistic Nifty values. You can modify any
+                value before analyzing.
               </p>
+              <div className="mt-6 grid grid-cols-3 gap-2 max-w-xs text-xs text-textMuted">
+                {["Long Straddle", "Iron Condor", "Bull Spread"].map((name) => (
+                  <div key={name} className="bg-surface border border-border rounded-lg px-2 py-1.5 text-center">
+                    {name}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

@@ -18,6 +18,23 @@ const upstoxGet = async (path, params = {}) => {
   return data;
 };
 
+// ── Yahoo Finance chart API fallback ──────────────────────
+const yahooFallback = async (symbol, interval, range) => {
+  try {
+    // Convert Yahoo-style symbol if needed (e.g. RELIANCE.NS stays as-is for Yahoo)
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+    const { data } = await axios.get(url, {
+      params: { interval, range },
+      headers: { "User-Agent": "Mozilla/5.0" },
+      timeout: 10000,
+    });
+    return data?.chart?.result?.[0] || null;
+  } catch (err) {
+    console.warn(`[marketService] Yahoo fallback request failed for ${symbol}:`, err.message);
+    return null;
+  }
+};
+
 // ══════════════════════════════════════════════════════════
 //  SYMBOL MAPPING: Yahoo-style ↔ Upstox instrument_key
 // ══════════════════════════════════════════════════════════
@@ -231,61 +248,82 @@ const normalizeQuote = (q, originalSymbol) => {
   };
 };
 
+// ── Yahoo Finance fallback for chart data ─────────────────
+const getChartDataYahoo = async (symbol, interval, range) => {
+  try {
+    const intervalMap = { "1d":"1d", "1wk":"1wk", "1mo":"1mo" };
+    const result = await yahooFallback(symbol, intervalMap[interval] || "1d", range);
+    if (!result) return [];
+
+    const timestamps = result.timestamp || [];
+    const ohlcv      = result.indicators?.quote?.[0] || {};
+
+    return timestamps
+      .map((ts, i) => {
+        const open  = ohlcv.open?.[i];
+        const high  = ohlcv.high?.[i];
+        const low   = ohlcv.low?.[i];
+        const close = ohlcv.close?.[i];
+        if (open == null || high == null || low == null || close == null) return null;
+        return {
+          time:   ts,
+          open:   parseFloat(open.toFixed(2)),
+          high:   parseFloat(high.toFixed(2)),
+          low:    parseFloat(low.toFixed(2)),
+          close:  parseFloat(close.toFixed(2)),
+          volume: ohlcv.volume?.[i] || 0,
+        };
+      })
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.findIndex((x) => x.time === v.time) === i)
+      .sort((a, b) => a.time - b.time);
+  } catch (err) {
+    console.error(`[marketService] Yahoo chart fallback failed:`, err.message);
+    return [];
+  }
+};
+
 // ── OHLCV chart data ──────────────────────────────────────
 const getChartData = async (symbol, interval = "1d", range = "3mo") => {
   try {
     const instrumentKey = await resolveInstrumentKey(symbol);
-    const encodedKey = encodeURIComponent(instrumentKey);
+    const encodedKey    = encodeURIComponent(instrumentKey);
 
-    // Map app interval → Upstox interval
     const intervalMap = {
-      "1m": "1minute", "5m": "5minute", "15m": "15minute", "30m": "30minute",
-      "1h": "60minute", "1d": "day", "1wk": "week", "1mo": "month",
+      "1d": "day", "1wk": "week", "1mo": "month",
     };
     const upstoxInterval = intervalMap[interval] || "day";
 
-    // Calculate date range
-    const toDate = new Date();
+    const toDate   = new Date();
     const fromDate = new Date();
     const rangeMap = {
-      "1d": 1, "5d": 5, "1mo": 30, "3mo": 90,
-      "6mo": 180, "1y": 365, "2y": 730, "5y": 1825,
+      "1d":1,"5d":5,"1mo":30,"3mo":90,
+      "6mo":180,"1y":365,"2y":730,"5y":1825,
     };
     fromDate.setDate(fromDate.getDate() - (rangeMap[range] || 90));
 
-    const toStr = toDate.toISOString().split("T")[0];
+    const toStr   = toDate.toISOString().split("T")[0];
     const fromStr = fromDate.toISOString().split("T")[0];
 
-    // Determine endpoint: intraday for short intervals requesting today's data,
-    // historical-candle for everything else
-    const isIntraday = ["1minute", "5minute", "15minute", "30minute", "60minute"].includes(upstoxInterval);
-    const isToday = range === "1d";
-
-    let candles = [];
-
-    if (isIntraday && isToday) {
-      // Use intraday endpoint
-      const data = await upstoxGet(
-        `/historical-candle/intraday/${encodedKey}/${upstoxInterval}`
-      );
-      candles = data?.data?.candles || [];
-    } else {
-      // Use historical endpoint
-      const data = await upstoxGet(
+    // Always use historical endpoint
+    let data;
+    try {
+      data = await upstoxGet(
         `/historical-candle/${encodedKey}/${upstoxInterval}/${toStr}/${fromStr}`
       );
-      candles = data?.data?.candles || [];
+    } catch (upstoxErr) {
+      // Upstox failed — use Yahoo fallback
+      console.warn(`[marketService] Upstox chart failed for ${symbol}, using Yahoo fallback`);
+      return await getChartDataYahoo(symbol, interval, range);
     }
 
+    const candles = data?.data?.candles || [];
     if (!candles.length) {
-      console.warn(`[marketService] No chart data for ${symbol}`);
-      return [];
+      console.warn(`[marketService] No Upstox chart data for ${symbol}, trying Yahoo`);
+      return await getChartDataYahoo(symbol, interval, range);
     }
 
-    // Upstox candle format: [timestamp, open, high, low, close, volume, oi]
-    // Sort ascending by time (Upstox returns descending)
     const sorted = candles.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-
     return sorted.map((c) => ({
       time:   Math.floor(new Date(c[0]).getTime() / 1000),
       open:   parseFloat(parseFloat(c[1]).toFixed(2)),
@@ -296,7 +334,7 @@ const getChartData = async (symbol, interval = "1d", range = "3mo") => {
     }));
   } catch (err) {
     console.error(`[marketService] getChartData failed for ${symbol}:`, err.message);
-    return [];
+    return await getChartDataYahoo(symbol, interval, range);
   }
 };
 

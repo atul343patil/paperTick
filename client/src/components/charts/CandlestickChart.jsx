@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createChart, CrosshairMode } from "lightweight-charts";
 import { useSelector } from "react-redux";
-import { calculateSMA, calculateRSI } from "../../utils/indicators";
+import { calculateEMA, calculateRSI } from "../../utils/indicators";
 import Loader from "../common/Loader";
 
 const THEME = {
@@ -96,19 +96,23 @@ const CandlestickChart = ({ showMA = true, showVolume = true }) => {
     });
 
     const ma20Series = mainChart.addLineSeries({
-      color:             THEME.ma20,
-      lineWidth:         1.5,
-      priceLineVisible:  false,
-      lastValueVisible:  false,
-      crosshairMarkerVisible: false,
+      color:                  THEME.ma20,
+      lineWidth:              2,
+      priceLineVisible:       true,
+      lastValueVisible:       true,
+      crosshairMarkerVisible: true,
+      crosshairMarkerRadius:  3,
+      title:                  "EMA 20",
     });
 
     const ma50Series = mainChart.addLineSeries({
-      color:             THEME.ma50,
-      lineWidth:         1.5,
-      priceLineVisible:  false,
-      lastValueVisible:  false,
-      crosshairMarkerVisible: false,
+      color:                  THEME.ma50,
+      lineWidth:              2,
+      priceLineVisible:       true,
+      lastValueVisible:       true,
+      crosshairMarkerVisible: true,
+      crosshairMarkerRadius:  3,
+      title:                  "EMA 50",
     });
 
     const rsiSeries = rsiChart.addLineSeries({
@@ -206,14 +210,31 @@ const CandlestickChart = ({ showMA = true, showVolume = true }) => {
         );
       }
 
-      // MA 20
-      if (showMA && chartData.length >= 20) {
-        s.ma20.setData(calculateSMA(chartData, 20));
-      }
+      // ── MA indicators ────────────────────────────────────────
+      // Use EMA instead of SMA for better visual continuity
+      // EMA20 requires minimum 20 candles
+      // EMA50 requires minimum 50 candles — fall back to EMA20 line if not enough data
 
-      // MA 50
-      if (showMA && chartData.length >= 50) {
-        s.ma50.setData(calculateSMA(chartData, 50));
+      if (showMA) {
+        // EMA 20 — show when >= 20 candles available
+        if (chartData.length >= 20) {
+          const ema20Data = calculateEMA(chartData, 20);
+          if (ema20Data.length > 0) {
+            s.ma20.setData(ema20Data);
+          }
+        } else {
+          s.ma20.setData([]); // clear if not enough data
+        }
+
+        // EMA 50 — show when >= 50 candles, otherwise clear
+        if (chartData.length >= 50) {
+          const ema50Data = calculateEMA(chartData, 50);
+          if (ema50Data.length > 0) {
+            s.ma50.setData(ema50Data);
+          }
+        } else {
+          s.ma50.setData([]); // not enough candles — clear gracefully
+        }
       }
 
       // RSI
@@ -249,9 +270,14 @@ const CandlestickChart = ({ showMA = true, showVolume = true }) => {
         )}
         {showMA && (
           <>
-            <span className="text-primary text-xs">— MA 20</span>
-            <span className="text-warning text-xs">— MA 50</span>
+            <span className="text-primary text-xs">— EMA 20</span>
+            <span className="text-warning text-xs">— EMA 50</span>
           </>
+        )}
+        {showMA && chartData.length < 50 && chartData.length >= 20 && (
+          <span className="text-textMuted text-xs ml-2">
+            (EMA 50 needs {50 - chartData.length} more candles)
+          </span>
         )}
         <span className="text-purple-400 text-xs">— RSI 14</span>
       </div>

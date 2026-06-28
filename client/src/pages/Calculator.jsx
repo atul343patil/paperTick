@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Navbar from "../components/common/Navbar";
 import IndicesTicker from "../components/markets/IndicesTicker";
-import { calculateOptionPrice, getModelStatus, triggerTraining } from "../api/calculatorApi";
+import { calculateOptionPrice, getModelStatus } from "../api/calculatorApi";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ReferenceLine, ResponsiveContainer, Legend,
@@ -32,7 +32,7 @@ const Calculator = () => {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [modelStatus, setModelStatus] = useState(null);
-  const [training, setTraining] = useState(false);
+
   const [errors, setErrors] = useState({});
   const [showAccuracy, setShowAccuracy] = useState(false);
 
@@ -77,14 +77,7 @@ const Calculator = () => {
     } finally { setLoading(false); }
   };
 
-  const handleTrain = async () => {
-    setTraining(true);
-    try {
-      await triggerTraining();
-      toast.success("Training started. This may take 3-5 minutes.");
-    } catch { toast.error("ML service unavailable"); }
-    finally { setTraining(false); }
-  };
+
 
   const weeksDisplay = form.days ? `= ${(parseFloat(form.days) / 7).toFixed(1)} weeks` : "";
 
@@ -119,7 +112,8 @@ const Calculator = () => {
     { key: "rho",   label: "Rho",   dp: 4, color: "text-textSecondary", desc: "Price change per 1% rate change" },
   ];
 
-  const isTrained = modelStatus?.is_trained;
+
+
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -133,13 +127,12 @@ const Calculator = () => {
           <p className="text-xs text-textSecondary mt-0.5">Hybrid LSTM-CNN vs Black-Scholes vs Monte Carlo</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${isTrained ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
-            {isTrained ? "Model Trained" : "Using Baseline"}
-          </span>
-          <button onClick={handleTrain} disabled={training}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-surfaceAlt text-textSecondary hover:text-textPrimary border border-border hover:border-primary/40 transition-colors disabled:opacity-50">
-            {training ? "Starting..." : "Train Model"}
-          </button>
+          {modelStatus?.is_trained && (
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-success/10 text-success text-xs font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-success" />
+              Model Trained ({modelStatus.trained_on || "NSE Nifty Options"})
+            </span>
+          )}
         </div>
       </div>
 

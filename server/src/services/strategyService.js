@@ -52,6 +52,18 @@ const calculateMetrics = (payoffCurve, legs) => {
     }
   }
 
+  // ── Detect unlimited profit/loss ─────────────────────────
+  // A strategy has unlimited profit if the payoff at the edges
+  // is still increasing (slope is positive at boundary).
+  // A strategy has unlimited loss if slope is still negative.
+  const n          = payoffCurve.length;
+  const lastSlope  = payoffCurve[n - 1].payoff - payoffCurve[n - 2].payoff;
+  const firstSlope = payoffCurve[1].payoff - payoffCurve[0].payoff;
+  const threshold  = Math.abs(maxProfit - maxLoss) * 0.01; // 1% of range
+
+  const hasUnlimitedProfit = lastSlope > threshold || firstSlope > threshold;
+  const hasUnlimitedLoss   = lastSlope < -threshold || firstSlope < -threshold;
+
   // Net premium (positive = credit received, negative = debit paid)
   const netPremium = legs.reduce((sum, leg) => {
     const contracts  = leg.lots * leg.lotSize;
@@ -59,17 +71,19 @@ const calculateMetrics = (payoffCurve, legs) => {
     return sum + multiplier * leg.premium * contracts;
   }, 0);
 
-  const riskReward = maxLoss !== 0
+  const riskReward = !hasUnlimitedProfit && !hasUnlimitedLoss && maxLoss !== 0
     ? parseFloat(Math.abs(maxProfit / maxLoss).toFixed(2))
     : null;
 
   return {
-    maxProfit:   maxProfit === Infinity  ? "Unlimited" : parseFloat(maxProfit.toFixed(2)),
-    maxLoss:     maxLoss   === -Infinity ? "Unlimited" : parseFloat(maxLoss.toFixed(2)),
+    maxProfit:   hasUnlimitedProfit ? "Unlimited" : parseFloat(maxProfit.toFixed(2)),
+    maxLoss:     hasUnlimitedLoss   ? "Unlimited" : parseFloat(maxLoss.toFixed(2)),
     breakevens,
     netPremium:  parseFloat(netPremium.toFixed(2)),
     riskReward,
     isDebit:     netPremium < 0,
+    hasUnlimitedProfit,
+    hasUnlimitedLoss,
   };
 };
 
@@ -134,13 +148,13 @@ const analyzeStrategy = (strategyName, params, underlyingPrice) => {
   const payoffCurve = generatePayoffCurve(legs, underlyingPrice);
   const metrics     = calculateMetrics(payoffCurve, legs);
 
-  return { legs, payoffCurve, metrics };
+  return { legs, payoffCurve, metrics, underlyingPrice };
 };
 
 const analyzeCustomStrategy = (legs, underlyingPrice) => {
   const payoffCurve = generatePayoffCurve(legs, underlyingPrice);
   const metrics     = calculateMetrics(payoffCurve, legs);
-  return { legs, payoffCurve, metrics };
+  return { legs, payoffCurve, metrics, underlyingPrice };
 };
 
 module.exports = {

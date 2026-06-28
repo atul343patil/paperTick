@@ -32,6 +32,55 @@ const resolveUnderlying = (symbol) => {
   return UNDERLYING_MAP[upper] || `NSE_INDEX|${symbol}`;
 };
 
+// ── Format date as DD-MMM-YYYY (e.g. "27-Jun-2024") ──────
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const formatDateDDMMMYYYY = (d) => {
+  const day = String(d.getDate()).padStart(2, "0");
+  const mon = MONTHS[d.getMonth()];
+  const yr  = d.getFullYear();
+  return `${day}-${mon}-${yr}`;
+};
+
+// ── Generate next 4 Thursday expiries ─────────────────────
+const generateExpiries = () => {
+  const expiries = [];
+  const d = new Date();
+
+  for (let week = 0; week < 4; week++) {
+    const next = new Date(d);
+    const daysToThursday = (4 - d.getDay() + 7) % 7 || 7;
+    next.setDate(d.getDate() + daysToThursday + (week * 7));
+    expiries.push(formatDateDDMMMYYYY(next));
+  }
+  return expiries;
+};
+
+// ── Tag strikes with ATM / ITM / OTM ─────────────────────
+const tagStrikes = (strikes, underlyingValue) => {
+  let atmStrike = strikes[0]?.strikePrice;
+  let minDiff   = Infinity;
+  strikes.forEach((s) => {
+    const diff = Math.abs(s.strikePrice - underlyingValue);
+    if (diff < minDiff) {
+      minDiff   = diff;
+      atmStrike = s.strikePrice;
+    }
+  });
+
+  const taggedStrikes = strikes.map((s) => ({
+    ...s,
+    isATM: s.strikePrice === atmStrike,
+    ceMoneyness: s.strikePrice < underlyingValue ? "ITM"
+               : s.strikePrice === atmStrike      ? "ATM"
+               : "OTM",
+    peMoneyness: s.strikePrice > underlyingValue ? "ITM"
+               : s.strikePrice === atmStrike      ? "ATM"
+               : "OTM",
+  }));
+
+  return { taggedStrikes, atmStrike };
+};
+
 // ── Fetch option chain from Upstox ────────────────────────
 const getOptionChain = async (symbol = "NIFTY", expiry = null) => {
   const instrumentKey = resolveUnderlying(symbol);
@@ -85,8 +134,12 @@ const getNextExpiry = async (instrumentKey) => {
     console.warn("[optionService] Could not fetch expiries:", err.message);
   }
 
-  // Fallback: next Thursday
-  return getNextThursday();
+  // Fallback: next Thursday ISO format for API call
+  const d = new Date();
+  const day = d.getDay();
+  const daysToThursday = (4 - day + 7) % 7 || 7;
+  d.setDate(d.getDate() + daysToThursday);
+  return d.toISOString().split("T")[0];
 };
 
 // ── Parse Upstox option chain into our format ─────────────
@@ -94,41 +147,31 @@ const parseUpstoxOptionChain = (chainData, symbol, expiry) => {
   // Get underlying value from the first entry
   const underlyingValue = chainData[0]?.underlying_spot_price || 0;
 
-  // Collect unique expiry dates
-  const expiryDates = [...new Set(chainData.map((d) => d.expiry))].sort();
+  // Collect unique expiry dates and format them
+  const rawExpiries = [...new Set(chainData.map((d) => d.expiry))].sort();
+  const expiryDates = rawExpiries.map((e) => {
+    try {
+      const d = new Date(e);
+      return isNaN(d.getTime()) ? e : formatDateDDMMMYYYY(d);
+    } catch { return e; }
+  });
 
   // Group by strike price
   const strikeMap = new Map();
 
+  // Build a lookup from raw expiry → formatted expiry for strike tagging
+  const rawToFormatted = {};
+  rawExpiries.forEach((raw, i) => { rawToFormatted[raw] = expiryDates[i]; });
+
   for (const item of chainData) {
     const strike = item.strike_price;
     if (!strikeMap.has(strike)) {
-      strikeMap.set(strike, { strikePrice: strike, expiryDate: item.expiry, CE: null, PE: null });
+      // Use formatted expiry (DD-MMM-YYYY) so it matches selectedExpiry in the frontend
+      const formattedExpiry = rawToFormatted[item.expiry] || item.expiry;
+      strikeMap.set(strike, { strikePrice: strike, expiryDate: formattedExpiry, CE: null, PE: null });
     }
 
     const entry = strikeMap.get(strike);
-    const marketData = item.market_data || {};
-    const optionGreeks = item.option_greeks || {};
-
-    const optionData = {
-      lastPrice:            marketData.ltp || 0,
-      impliedVolatility:    optionGreeks.vega ? (optionGreeks.iv || 0) : 0,
-      openInterest:         marketData.oi || 0,
-      changeinOpenInterest: marketData.oi_day_change || 0,
-      totalTradedVolume:    marketData.volume || 0,
-      change:               marketData.net_change || 0,
-      pChange:              marketData.ltp && marketData.prev_close
-                              ? parseFloat(((marketData.net_change / marketData.prev_close) * 100).toFixed(2))
-                              : 0,
-      bidQty:               marketData.bid_qty || 0,
-      bidprice:             marketData.bid_price || 0,
-      askQty:               marketData.ask_qty || 0,
-      askPrice:             marketData.ask_price || 0,
-      delta:                optionGreeks.delta || null,
-      gamma:                optionGreeks.gamma || null,
-      theta:                optionGreeks.theta || null,
-      vega:                 optionGreeks.vega || null,
-    };
 
     if (item.call_options && item.call_options.market_data) {
       const cm = item.call_options.market_data;
@@ -181,7 +224,10 @@ const parseUpstoxOptionChain = (chainData, symbol, expiry) => {
 
   const strikes = [...strikeMap.values()].sort((a, b) => a.strikePrice - b.strikePrice);
 
-  return { symbol, underlyingValue, expiryDates, strikes };
+  // Tag with ATM / ITM / OTM
+  const { taggedStrikes, atmStrike } = tagStrikes(strikes, underlyingValue);
+
+  return { symbol, underlyingValue, expiryDates, strikes: taggedStrikes, atmStrike };
 };
 
 // ── Simulated data (fallback when Upstox fails) ───────────
@@ -192,6 +238,9 @@ const simulateOptionChain = (symbol) => {
 
   const atm = Math.round(basePrice / step) * step;
   const strikes = [];
+
+  const expiries = generateExpiries();
+  const nearestExpiry = expiries[0];
 
   for (let i = -strikesAboveBelow; i <= strikesAboveBelow; i++) {
     const strike = atm + i * step;
@@ -209,9 +258,13 @@ const simulateOptionChain = (symbol) => {
       : peIV * Math.sqrt(30 / 365) * strike * 0.01
     );
 
+    // Realistic pChange: ATM options have smaller % change, OTM can swing more
+    const cePChange = parseFloat(((Math.random() * 10 - 5) * (1 + Math.abs(i) * 0.3)).toFixed(2));
+    const pePChange = parseFloat(((Math.random() * 10 - 5) * (1 + Math.abs(i) * 0.3)).toFixed(2));
+
     strikes.push({
       strikePrice: strike,
-      expiryDate: getNextThursday(),
+      expiryDate: nearestExpiry,
       CE: {
         lastPrice:            +cePremium.toFixed(2),
         impliedVolatility:    +ceIV.toFixed(2),
@@ -219,7 +272,7 @@ const simulateOptionChain = (symbol) => {
         changeinOpenInterest: Math.floor((Math.random() - 0.5) * 10000),
         totalTradedVolume:    Math.floor(Math.random() * 20000 + 5000),
         change:               +(Math.random() * 20 - 10).toFixed(2),
-        pChange:              +(Math.random() * 10 - 5).toFixed(2),
+        pChange:              cePChange,
         bidQty: 75, bidprice: +(cePremium - 0.5).toFixed(2),
         askQty: 75, askPrice: +(cePremium + 0.5).toFixed(2),
         delta: +(0.5 + (moneyness / (strike * 0.1))).toFixed(2),
@@ -234,7 +287,7 @@ const simulateOptionChain = (symbol) => {
         changeinOpenInterest: Math.floor((Math.random() - 0.5) * 10000),
         totalTradedVolume:    Math.floor(Math.random() * 20000 + 5000),
         change:               +(Math.random() * 20 - 10).toFixed(2),
-        pChange:              +(Math.random() * 10 - 5).toFixed(2),
+        pChange:              pePChange,
         bidQty: 75, bidprice: +(pePremium - 0.5).toFixed(2),
         askQty: 75, askPrice: +(pePremium + 0.5).toFixed(2),
         delta: -(+(0.5 - (moneyness / (strike * 0.1))).toFixed(2)),
@@ -245,23 +298,46 @@ const simulateOptionChain = (symbol) => {
     });
   }
 
-  const expiries = [getNextThursday(), getMonthlyExpiry()];
-  return { symbol, underlyingValue: basePrice, expiryDates: expiries, strikes };
+  // Tag with ATM / ITM / OTM
+  const { taggedStrikes, atmStrike } = tagStrikes(strikes, basePrice);
+
+  return { symbol, underlyingValue: basePrice, expiryDates: expiries, strikes: taggedStrikes, atmStrike };
 };
 
-const getNextThursday = () => {
-  const d = new Date();
-  const day = d.getDay();
-  const daysToThursday = (4 - day + 7) % 7 || 7;
-  d.setDate(d.getDate() + daysToThursday);
-  return d.toISOString().split("T")[0];
-};
+module.exports = { getOptionChain, getLTPForContract, getLTPsForPositions };
 
-const getMonthlyExpiry = () => {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1, 1);
-  while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
-  return d.toISOString().split("T")[0];
-};
+// ── Get current LTP for a specific option contract ────────
+async function getLTPForContract(underlying, strikePrice, optionType) {
+  try {
+    const chain = await getOptionChain(underlying);
+    if (!chain || !chain.strikes) return null;
+    const strike = chain.strikes.find((s) => s.strikePrice === strikePrice);
+    if (!strike) return null;
+    const side = optionType === "CE" ? strike.CE : strike.PE;
+    return side?.lastPrice ?? null;
+  } catch { return null; }
+}
 
-module.exports = { getOptionChain };
+// ── Batch-fetch LTPs for multiple positions ───────────────
+async function getLTPsForPositions(positions) {
+  const ltpMap = {};
+  const byUnderlying = {};
+  for (const pos of positions) {
+    if (!byUnderlying[pos.underlying]) byUnderlying[pos.underlying] = [];
+    byUnderlying[pos.underlying].push(pos);
+  }
+  for (const [underlying, posGroup] of Object.entries(byUnderlying)) {
+    try {
+      const chain = await getOptionChain(underlying);
+      if (!chain || !chain.strikes) continue;
+      for (const pos of posGroup) {
+        const strike = chain.strikes.find((s) => s.strikePrice === pos.strikePrice);
+        if (!strike) continue;
+        const side = pos.optionType === "CE" ? strike.CE : strike.PE;
+        const key = `${pos.underlying}_${pos.strikePrice}_${pos.optionType}`;
+        ltpMap[key] = side?.lastPrice ?? null;
+      }
+    } catch { /* skip */ }
+  }
+  return ltpMap;
+}

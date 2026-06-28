@@ -23,8 +23,8 @@ const getChart = asyncHandler(async (req, res) => {
   const { symbol } = req.params;
   const { interval = "1d", range = "3mo" } = req.query;
 
-  const validIntervals = ["1m","5m","15m","30m","1h","1d","1wk","1mo"];
-  const validRanges   = ["1d","5d","1mo","3mo","6mo","1y","2y","5y"];
+  const validIntervals = ["1d", "1wk", "1mo"];
+  const validRanges    = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"];
 
   if (!validIntervals.includes(interval)) {
     throw new ApiError(400, `Invalid interval. Use: ${validIntervals.join(", ")}`);

@@ -52,10 +52,21 @@ const Navbar = () => {
 			{/* User section */}
 			<div className="flex items-center gap-4">
 				<div className="text-right hidden sm:block">
-					<p className="text-xs text-textSecondary">Virtual Balance</p>
-					<p className="text-sm font-semibold text-success">
-						Rs {user?.virtualBalance?.toLocaleString("en-IN") || "1,00,000"}
-					</p>
+					<div className="flex items-center gap-3">
+						<div>
+							<p className="text-xs text-textMuted">Equity</p>
+							<p className="text-xs font-semibold text-success">
+								₹{user?.virtualBalance?.toLocaleString("en-IN") || "1,00,000"}
+							</p>
+						</div>
+						<div className="w-px h-6 bg-border" />
+						<div>
+							<p className="text-xs text-textMuted">F&O</p>
+							<p className="text-xs font-semibold text-primary">
+								₹{user?.fnoBalance?.toLocaleString("en-IN") || "2,00,000"}
+							</p>
+						</div>
+					</div>
 				</div>
 
 				<div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-semibold">

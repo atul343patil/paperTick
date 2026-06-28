@@ -28,6 +28,10 @@ const userSchema = new mongoose.Schema(
 			type: Number,
 			default: 100000,
 		},
+		fnoBalance: {
+			type: Number,
+			default: 200000,
+		},
 		isActive: {
 			type: Boolean,
 			default: true,

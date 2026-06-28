@@ -16,3 +16,7 @@ const server = app.listen(PORT, () => {
 // Initialize WebSocket service (Upstox bridge + frontend broadcast)
 const websocketService = require("./src/services/websocketService");
 websocketService.init(server);
+
+// Start pending order scanner (LIMIT/SL auto-execution)
+const optionOrderService = require("./src/services/optionOrderService");
+optionOrderService.start();

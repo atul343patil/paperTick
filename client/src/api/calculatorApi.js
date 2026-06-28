@@ -6,5 +6,3 @@ export const calculateOptionPrice = (payload) =>
 export const getModelStatus = () =>
   axiosInstance.get("/calculator/model-status").then((r) => r.data.data);
 
-export const triggerTraining = () =>
-  axiosInstance.post("/calculator/train", {}).then((r) => r.data.data);

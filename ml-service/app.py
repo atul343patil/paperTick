@@ -6,8 +6,7 @@ Port: 5001
 
 import logging
 import math
-import threading
-from datetime import datetime
+import os
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -15,7 +14,7 @@ from flask_cors import CORS
 from utils.validators import validate_inputs
 from utils.feature_engineering import create_sequence, compute_features
 from models import black_scholes, monte_carlo, ensemble
-from models.hybrid_model import HybridModel, generate_synthetic_data
+from models.hybrid_model import HybridModel, WEIGHTS_PATH
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -28,10 +27,6 @@ CORS(app, origins=["http://localhost:5000", "http://localhost:5173"])
 # --- Load model ---
 hybrid = HybridModel()
 hybrid.load()
-
-# --- Training lock ---
-training_lock = threading.Lock()
-training_in_progress = False
 
 
 def _sanitize_float(val):
@@ -66,14 +61,19 @@ def health():
 
 @app.route("/model-status", methods=["GET"])
 def model_status():
-    """Return the current model training status."""
-    return jsonify({
-        "is_trained": hybrid.is_trained,
-        "training_accuracy": hybrid.training_accuracy,
-        "model_type": "Hybrid LSTM-CNN",
-        "last_trained": hybrid.last_trained,
-        "training_in_progress": training_in_progress,
-    })
+    """Return the current model status (pre-trained weights check)."""
+    weights_exist = os.path.exists(WEIGHTS_PATH)
+    if weights_exist:
+        return jsonify({
+            "is_trained": True,
+            "model_type": "Hybrid LSTM-CNN",
+            "trained_on": "NSE Nifty Options 2023-2025",
+        })
+    else:
+        return jsonify({
+            "is_trained": False,
+            "model_type": "Hybrid LSTM-CNN (fallback to BS+noise — run train_offline.py)",
+        })
 
 
 @app.route("/predict", methods=["POST"])
@@ -218,37 +218,6 @@ def _check_put_call_parity(S, K, T, r, result, option_type):
                 logger.debug("Put-call parity: implied call is negative (deep ITM put)")
     except Exception:
         pass
-
-
-@app.route("/train", methods=["POST"])
-def train():
-    """Trigger model training with synthetic data."""
-    global training_in_progress
-
-    if training_in_progress:
-        return jsonify({"status": "already_training", "message": "Training is already in progress."}), 409
-
-    def _train_async():
-        global training_in_progress
-        training_in_progress = True
-        try:
-            logger.info("Starting model training with synthetic data...")
-            X, y, params = generate_synthetic_data(n_samples=5000)
-            result = hybrid.train(X, y)
-            logger.info(f"Training complete: {result}")
-        except Exception as e:
-            logger.error(f"Training failed: {e}")
-        finally:
-            training_in_progress = False
-
-    thread = threading.Thread(target=_train_async, daemon=True)
-    thread.start()
-
-    return jsonify({
-        "status": "training_started",
-        "estimated_minutes": 5,
-        "message": "Model training initiated in background.",
-    })
 
 
 # ── Main ─────────────────────────────────────────────────────────────
