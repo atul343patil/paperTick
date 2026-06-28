@@ -1,6 +1,7 @@
 const express = require("express");
 const router  = express.Router();
 const { protect } = require("../middleware/authMiddleware");
+const marketHours = require("../middleware/marketHours");
 const {
   getChain, placeTrade, getPositions, getPositionsWithLTP,
   getOrders, cancelOrder, closeTrade,
@@ -15,9 +16,10 @@ router.get("/positions", getPositions);
 router.get("/positions/live", getPositionsWithLTP);
 router.get("/orders", getOrders);
 router.patch("/cancel/:id", cancelOrder);
-router.patch("/close/:id", closeTrade);
+router.patch("/close/:id", marketHours, closeTrade);
 router.post(
   "/trade",
+  marketHours,
   [
     body("underlying").trim().notEmpty().withMessage("Please select an underlying."),
     body("expiry").trim().notEmpty().withMessage("Please select an expiry date."),

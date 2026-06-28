@@ -4,6 +4,8 @@ import { submitOrder, loadPortfolio, clearError } from "../../store/slices/portf
 import { loadUser } from "../../store/slices/authSlice";
 import { previewCharges } from "../../utils/calculations";
 import { formatINR } from "../../utils/formatters";
+import { getMarketStatus } from "../../utils/marketHours";
+import { Clock } from "lucide-react";
 import toast from "react-hot-toast";
 
 const TAB = { BUY: "BUY", SELL: "SELL" };
@@ -20,6 +22,16 @@ const OrderForm = ({ symbol, name, currentPrice }) => {
   const [quantity, setQuantity] = useState("");
   const [limitPrice, setLimitPrice] = useState("");
 
+  // Market hours status
+  const [marketStatus, setMarketStatus] = useState(getMarketStatus());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMarketStatus(getMarketStatus());
+    }, 30000); // Re-check every 30 seconds
+    return () => clearInterval(timer);
+  }, []);
+
   const price = orderType === "MARKET" ? currentPrice : parseFloat(limitPrice) || 0;
   const qty = parseInt(quantity) || 0;
   const charges = qty > 0 && price > 0 ? previewCharges(price, qty, side, productType) : null;
@@ -33,6 +45,10 @@ const OrderForm = ({ symbol, name, currentPrice }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!marketStatus.isOpen) {
+      toast.error("Trading is only available during market hours (9:15 AM – 3:30 PM IST).");
+      return;
+    }
     if (!symbol || !qty || qty < 1) { toast.error("Enter a valid quantity."); return; }
     if (orderType === "LIMIT" && (!limitPrice || parseFloat(limitPrice) <= 0)) {
       toast.error("Enter a valid limit price."); return;
@@ -76,6 +92,17 @@ const OrderForm = ({ symbol, name, currentPrice }) => {
       </div>
 
       <div className="p-4 space-y-4">
+        {/* ── Market Closed Warning ── */}
+        {!marketStatus.isOpen && (
+          <div className="flex items-start gap-2.5 bg-amber-500/5 border border-amber-500/25 rounded-lg p-3">
+            <Clock size={15} className="text-amber-400 mt-0.5 shrink-0 animate-pulse" />
+            <div>
+              <p className="text-xs font-semibold text-amber-400">Market Closed</p>
+              <p className="text-xs text-textSecondary mt-0.5">{marketStatus.message}</p>
+            </div>
+          </div>
+        )}
+
         {/* Symbol display */}
         <div className="flex items-center justify-between">
           <div>
@@ -195,16 +222,20 @@ const OrderForm = ({ symbol, name, currentPrice }) => {
         {/* Submit */}
         <button
           onClick={handleSubmit}
-          disabled={orderSubmitting || !symbol || !qty}
+          disabled={orderSubmitting || !symbol || !qty || !marketStatus.isOpen}
           className={`w-full py-3 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            side === TAB.BUY
-              ? "bg-success hover:bg-green-600 text-white"
-              : "bg-danger hover:bg-red-600 text-white"
+            !marketStatus.isOpen
+              ? "bg-gray-600 text-gray-300 cursor-not-allowed"
+              : side === TAB.BUY
+                ? "bg-success hover:bg-green-600 text-white"
+                : "bg-danger hover:bg-red-600 text-white"
           }`}
         >
-          {orderSubmitting
-            ? "Placing Order..."
-            : `${side === TAB.BUY ? "Buy" : "Sell"} ${symbol || "Stock"}`}
+          {!marketStatus.isOpen
+            ? "Market Closed"
+            : orderSubmitting
+              ? "Placing Order..."
+              : `${side === TAB.BUY ? "Buy" : "Sell"} ${symbol || "Stock"}`}
         </button>
       </div>
     </div>

@@ -1,6 +1,7 @@
 const axios = require("axios");
 const cacheService = require("./cacheService");
 const { getAccessToken } = require("./upstoxAuthService");
+const stockDatabase = require("./stockDatabase");
 
 const UPSTOX_BASE = "https://api.upstox.com/v2";
 
@@ -103,6 +104,14 @@ const REVERSE_MAP = {};
 for (const [yahoo, upstox] of Object.entries(HARDCODED_KEYS)) {
   REVERSE_MAP[upstox] = yahoo;
 }
+
+// Register all stocks from local database into the maps
+stockDatabase.getAll().forEach((stock) => {
+  if (stock.instrumentKey && !HARDCODED_KEYS[stock.symbol]) {
+    HARDCODED_KEYS[stock.symbol] = stock.instrumentKey;
+    REVERSE_MAP[stock.instrumentKey] = stock.symbol;
+  }
+});
 
 // ── Resolve a yahoo-style symbol to Upstox instrument_key ─
 const resolveInstrumentKey = async (symbol) => {
@@ -340,35 +349,53 @@ const getChartData = async (symbol, interval = "1d", range = "3mo") => {
 
 // ── Symbol search ─────────────────────────────────────────
 const searchSymbols = async (query) => {
+  // 1. Always search local database first (instant, no network call)
+  const localResults = stockDatabase.search(query, 10);
+
+  // 2. Try Upstox API as enrichment (may fail if token expired — that's OK)
+  let upstoxResults = [];
   try {
     const data = await upstoxGet("/instrument/search", {
       q: query,
       segment: "NSE_EQ",
     });
 
-    if (data.status !== "success" || !data.data) return [];
-
-    return data.data
-      .slice(0, 8)
-      .map((s) => {
-        const yahooSymbol = `${s.trading_symbol}.NS`;
-        // Cache the mapping for later use
-        if (s.instrument_key) {
-          HARDCODED_KEYS[yahooSymbol] = s.instrument_key;
-          REVERSE_MAP[s.instrument_key] = yahooSymbol;
-          cacheService.set(`ikey:${yahooSymbol}`, s.instrument_key, 86400);
-        }
-        return {
-          symbol:   yahooSymbol,
-          name:     s.name || s.trading_symbol,
-          exchange: s.exchange || "NSE",
-          type:     s.instrument_type || "EQ",
-        };
-      });
+    if (data.status === "success" && data.data) {
+      upstoxResults = data.data
+        .slice(0, 8)
+        .map((s) => {
+          const yahooSymbol = `${s.trading_symbol}.NS`;
+          // Cache the mapping for later use
+          if (s.instrument_key) {
+            HARDCODED_KEYS[yahooSymbol] = s.instrument_key;
+            REVERSE_MAP[s.instrument_key] = yahooSymbol;
+            cacheService.set(`ikey:${yahooSymbol}`, s.instrument_key, 86400);
+          }
+          return {
+            symbol:   yahooSymbol,
+            name:     s.name || s.trading_symbol,
+            exchange: s.exchange || "NSE",
+            type:     s.instrument_type || "EQ",
+          };
+        });
+    }
   } catch (err) {
-    console.error(`[marketService] searchSymbols failed:`, err.message);
-    return [];
+    // Upstox failed (token expired, network error, etc.) — local results still work
+    console.warn(`[marketService] Upstox search failed (using local results):`, err.message);
   }
+
+  // 3. Merge & deduplicate: local results first, then Upstox extras
+  const seenSymbols = new Set(localResults.map((r) => r.symbol));
+  const merged = [...localResults];
+
+  for (const item of upstoxResults) {
+    if (!seenSymbols.has(item.symbol)) {
+      merged.push(item);
+      seenSymbols.add(item.symbol);
+    }
+  }
+
+  return merged.slice(0, 10);
 };
 
 // ── Major indices ─────────────────────────────────────────

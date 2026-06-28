@@ -1,6 +1,7 @@
 const express = require("express");
 const router  = express.Router();
 const { protect } = require("../middleware/authMiddleware");
+const marketHours = require("../middleware/marketHours");
 const { placeOrder, getOrders, getPortfolio } = require("../controllers/tradingController");
 const { body } = require("express-validator");
 const validate = require("../middleware/validator");
@@ -9,6 +10,7 @@ router.use(protect);
 
 router.post(
   "/order",
+  marketHours,
   [
     body("symbol").trim().notEmpty().withMessage("Symbol is required"),
     body("name").trim().notEmpty().withMessage("Name is required"),

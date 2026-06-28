@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { X, ShoppingCart, Play } from "lucide-react";
+import { X, ShoppingCart, Play, Clock } from "lucide-react";
 import { submitOptionTrade, loadPositionsLive, loadOrders } from "../../store/slices/optionsSlice";
 import { loadUser } from "../../store/slices/authSlice";
 import { formatINR } from "../../utils/formatters";
+import { getMarketStatus } from "../../utils/marketHours";
 import toast from "react-hot-toast";
 
 const LOT_SIZES = { NIFTY: 25, BANKNIFTY: 15, FINNIFTY: 40, MIDCPNIFTY: 75 };
@@ -12,6 +13,16 @@ const BasketOrderPanel = ({ basket, onRemove, onClear }) => {
   const dispatch = useDispatch();
   const { tradeSubmitting } = useSelector((s) => s.options);
   const [executing, setExecuting] = useState(false);
+
+  // Market hours status
+  const [marketStatus, setMarketStatus] = useState(getMarketStatus());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMarketStatus(getMarketStatus());
+    }, 30000); // Re-check every 30 seconds
+    return () => clearInterval(timer);
+  }, []);
 
   if (basket.length === 0) return null;
 
@@ -23,6 +34,11 @@ const BasketOrderPanel = ({ basket, onRemove, onClear }) => {
   }, 0);
 
   const handleExecuteAll = async () => {
+    if (!marketStatus.isOpen) {
+      toast.error("Trading is only available during market hours (9:15 AM – 3:30 PM IST).");
+      return;
+    }
+
     setExecuting(true);
     let successCount = 0;
     let failCount    = 0;
@@ -78,6 +94,17 @@ const BasketOrderPanel = ({ basket, onRemove, onClear }) => {
             <button onClick={onClear} className="text-xs text-textMuted hover:text-danger">Clear All</button>
           </div>
         </div>
+
+        {/* ── Market Closed Warning ── */}
+        {!marketStatus.isOpen && (
+          <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/25 rounded-lg px-3 py-2 mb-3">
+            <Clock size={13} className="text-amber-400 shrink-0 animate-pulse" />
+            <p className="text-xs text-amber-400 font-medium">
+              Market Closed — {marketStatus.message}
+            </p>
+          </div>
+        )}
+
         {/* Basket items */}
         <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
           {basket.map((item, idx) => {
@@ -104,10 +131,23 @@ const BasketOrderPanel = ({ basket, onRemove, onClear }) => {
           })}
         </div>
         {/* Execute button */}
-        <button onClick={handleExecuteAll} disabled={executing || tradeSubmitting}
-          className="w-full py-2.5 bg-primary hover:bg-primaryHover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-          <Play size={14} />
-          {executing ? "Executing..." : `Execute ${basket.length} Orders`}
+        <button onClick={handleExecuteAll} disabled={executing || tradeSubmitting || !marketStatus.isOpen}
+          className={`w-full py-2.5 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+            !marketStatus.isOpen
+              ? "bg-gray-600 text-gray-300 cursor-not-allowed"
+              : "bg-primary hover:bg-primaryHover text-white"
+          }`}>
+          {!marketStatus.isOpen ? (
+            <>
+              <Clock size={14} />
+              Market Closed
+            </>
+          ) : (
+            <>
+              <Play size={14} />
+              {executing ? "Executing..." : `Execute ${basket.length} Orders`}
+            </>
+          )}
         </button>
       </div>
     </div>

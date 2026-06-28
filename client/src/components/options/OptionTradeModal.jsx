@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { X, ChevronUp, ChevronDown, AlertCircle } from "lucide-react";
+import { X, ChevronUp, ChevronDown, AlertCircle, Clock } from "lucide-react";
 import { submitOptionTrade, loadPositionsLive, loadOrders } from "../../store/slices/optionsSlice";
 import { loadUser } from "../../store/slices/authSlice";
 import { formatINR } from "../../utils/formatters";
+import { getMarketStatus } from "../../utils/marketHours";
 import toast from "react-hot-toast";
 
 const LOT_SIZES = { NIFTY: 25, BANKNIFTY: 15, FINNIFTY: 40, MIDCPNIFTY: 75 };
@@ -19,6 +20,16 @@ const OptionTradeModal = ({ option, onClose }) => {
   const [lots, setLots]             = useState(1);
   const [limitPrice, setLimitPrice] = useState("");
 
+  // Market hours status
+  const [marketStatus, setMarketStatus] = useState(getMarketStatus());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMarketStatus(getMarketStatus());
+    }, 30000); // Re-check every 30 seconds
+    return () => clearInterval(timer);
+  }, []);
+
   if (!option) return null;
 
   const { underlying, expiry, strikePrice, optionType } = option;
@@ -33,6 +44,10 @@ const OptionTradeModal = ({ option, onClose }) => {
   const isPending = orderType === "LIMIT" || orderType === "SL";
 
   const handleSubmit = async () => {
+    if (!marketStatus.isOpen) {
+      toast.error("Trading is only available during market hours (9:15 AM – 3:30 PM IST).");
+      return;
+    }
     if (lots < 1) { toast.error("Please enter at least 1 lot."); return; }
     if (isPending && (!limitPrice || parseFloat(limitPrice) <= 0)) {
       toast.error(orderType === "LIMIT"
@@ -88,6 +103,17 @@ const OptionTradeModal = ({ option, onClose }) => {
           </button>
         </div>
         <div className="px-5 py-4 space-y-4">
+          {/* ── Market Closed Warning ── */}
+          {!marketStatus.isOpen && (
+            <div className="flex items-start gap-2.5 bg-amber-500/5 border border-amber-500/25 rounded-lg p-3">
+              <Clock size={15} className="text-amber-400 mt-0.5 shrink-0 animate-pulse" />
+              <div>
+                <p className="text-xs font-semibold text-amber-400">Market Closed</p>
+                <p className="text-xs text-textSecondary mt-0.5">{marketStatus.message}</p>
+              </div>
+            </div>
+          )}
+
           {/* BUY / SELL Toggle */}
           <div className="flex gap-0 rounded-lg overflow-hidden border border-border">
             <button onClick={() => setAction("BUY")}
@@ -202,13 +228,17 @@ const OptionTradeModal = ({ option, onClose }) => {
             <span className="text-xs font-semibold text-success">{formatINR(user?.fnoBalance || 0)}</span>
           </div>
           {/* Submit */}
-          <button onClick={handleSubmit} disabled={tradeSubmitting}
+          <button onClick={handleSubmit} disabled={tradeSubmitting || !marketStatus.isOpen}
             className={`w-full py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-              action === "BUY" ? "bg-primary hover:bg-primaryHover text-white" : "bg-danger hover:bg-red-600 text-white"
+              !marketStatus.isOpen
+                ? "bg-gray-600 text-gray-300 cursor-not-allowed"
+                : action === "BUY" ? "bg-primary hover:bg-primaryHover text-white" : "bg-danger hover:bg-red-600 text-white"
             }`}>
-            {tradeSubmitting ? "Placing Order..."
-              : isPending ? `Place ${orderType} ${action}`
-              : `${action} ${underlying} ${strikePrice} ${optionType}`}
+            {!marketStatus.isOpen
+              ? "Market Closed"
+              : tradeSubmitting ? "Placing Order..."
+                : isPending ? `Place ${orderType} ${action}`
+                : `${action} ${underlying} ${strikePrice} ${optionType}`}
           </button>
         </div>
       </div>
