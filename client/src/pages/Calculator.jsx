@@ -364,9 +364,7 @@ const NNCard = ({ data, comparison, loading }) => (
             {fmtPct(comparison.bs_vs_nn_pct)} vs Black-Scholes
           </span>
         )}
-        {data.model_label && !data.is_trained && (
-          <span className="text-warning text-[10px] mt-1">NN untrained - using BS fallback</span>
-        )}
+
       </div>
     )}
   </div>
